@@ -311,7 +311,7 @@ export default function App() {
     <div className="max-w-4xl mx-auto p-6 flex flex-col items-center gap-8">
       <header className="text-center space-y-2 mt-8">
         <h1 className="text-6xl font-black italic uppercase tracking-tighter vapor-gradient-text drop-shadow-[0_0_15px_rgba(255,113,206,0.5)]">
-          VaporGlitch
+          VaporGlittttch
         </h1>
         <p className="font-mono text-vapor-cyan text-sm tracking-widest uppercase">
           // Circuit Bending Simulator //
