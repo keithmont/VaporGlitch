@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+  --color-vapor-pink: #ff71ce;
+  --color-vapor-blue: #01cdfe;
+  --color-vapor-cyan: #05ffa1;
+  --color-vapor-purple: #b967ff;
+  --color-vapor-yellow: #fffb96;
+  --color-vapor-dark: #241734;
+}
+
+:root {
+  --bg: #241734;
+  --ink: #ffffff;
+}
+
+body {
+  background-color: var(--color-vapor-dark);
+  color: white;
+  background-image: 
+    linear-gradient(rgba(185, 103, 255, 0.1) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(185, 103, 255, 0.1) 1px, transparent 1px);
+  background-size: 40px 40px;
+  min-height: 100vh;
+}
+
+.vapor-gradient-text {
+  background: linear-gradient(to bottom, var(--color-vapor-pink), var(--color-vapor-blue));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.vapor-border {
+  border: 2px solid var(--color-vapor-pink);
+  box-shadow: 0 0 10px var(--color-vapor-pink), inset 0 0 5px var(--color-vapor-pink);
+}
+
+.vapor-button {
+  background: var(--color-vapor-dark);
+  border: 2px solid var(--color-vapor-cyan);
+  color: var(--color-vapor-cyan);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  transition: all 0.2s ease;
+  box-shadow: 0 0 5px var(--color-vapor-cyan);
+}
+
+.vapor-button:hover {
+  background: var(--color-vapor-cyan);
+  color: var(--color-vapor-dark);
+  box-shadow: 0 0 20px var(--color-vapor-cyan);
+}
+
+.vapor-slider {
+  -webkit-appearance: none;
+  width: 100%;
+  height: 4px;
+  background: var(--color-vapor-purple);
+  outline: none;
+  border-radius: 2px;
+}
+
+.vapor-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  background: var(--color-vapor-pink);
+  cursor: pointer;
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--color-vapor-pink);
+}
