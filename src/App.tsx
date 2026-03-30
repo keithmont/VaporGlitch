@@ -71,6 +71,20 @@ export default function App() {
     setLocked(prev => ({ ...prev, [key]: !prev[key] }));
   };
 
+  const resetSliders = () => {
+    setGlitchLevel(0);
+    setSaturation(100);
+    setDrift(0);
+    setMosh(0);
+    setJitter(0);
+    setSkew(0);
+    setChromaticAberration(0);
+    setDroop(0);
+    setColorShift(0);
+    setCorruptionLevel(0);
+    setSharpness(100);
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -81,17 +95,7 @@ export default function App() {
         setGlitchedImage(null);
         
         // Reset sliders as requested
-        setGlitchLevel(0);
-        setSaturation(100);
-        setDrift(0);
-        setMosh(0);
-        setJitter(0);
-        setSkew(0);
-        setChromaticAberration(0);
-        setDroop(0);
-        setColorShift(0);
-        setCorruptionLevel(0);
-        setSharpness(100);
+        resetSliders();
 
         const img = new Image();
         img.onload = () => {
@@ -300,32 +304,64 @@ export default function App() {
           }
         }
 
-        // 6. Skew (VHS Tracking Error)
+        // 6. Skew (VHS Tracking Error / Bending)
         if (skew > 0) {
           const skewIntensity = skew / 100;
-          const maxSkew = skewIntensity * 100;
           const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const newData = new Uint8ClampedArray(tempImageData.data);
           
-          let currentSkew = 0;
+          // Composite wave parameters for organic bending
+          const amp1 = skewIntensity * 50; // Large slow bends
+          const freq1 = 0.002 + skewIntensity * 0.008;
+          
+          const amp2 = skewIntensity * 15; // Faster wiggles
+          const freq2 = 0.02 + skewIntensity * 0.05;
+          
+          const jitterAmp = skewIntensity * 4; // High frequency sync jitter
+          
           for (let y = 0; y < canvas.height; y++) {
-            // Occasional tearing/reset
-            if (Math.random() < 0.02 * skewIntensity) {
-              currentSkew = (Math.random() - 0.5) * maxSkew * 2;
-            }
+            // Calculate bending offset using multiple waves
+            const bend = Math.sin(y * freq1) * amp1 + Math.sin(y * freq2) * amp2;
+            const jitter = (Math.random() - 0.5) * jitterAmp;
+            const rowSkew = bend + jitter;
             
-            const rowSkew = currentSkew + (y / canvas.height) * (skewIntensity * 40);
+            const isSkewed = Math.abs(rowSkew) > 5;
             
             for (let x = 0; x < canvas.width; x++) {
-              const sourceX = Math.floor(x + rowSkew);
-              if (sourceX >= 0 && sourceX < canvas.width) {
-                const targetIdx = (y * canvas.width + x) * 4;
-                const sourceIdx = (y * canvas.width + sourceX) * 4;
-                newData[targetIdx] = tempImageData.data[sourceIdx];
-                newData[targetIdx + 1] = tempImageData.data[sourceIdx + 1];
-                newData[targetIdx + 2] = tempImageData.data[sourceIdx + 2];
-                newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
+              // Wrap around the image for a more authentic tracking error look
+              const sourceX = (Math.floor(x + rowSkew) + canvas.width) % canvas.width;
+              
+              const targetIdx = (y * canvas.width + x) * 4;
+              const sourceIdx = (y * canvas.width + sourceX) * 4;
+              
+              let r = tempImageData.data[sourceIdx];
+              let g = tempImageData.data[sourceIdx + 1];
+              let b = tempImageData.data[sourceIdx + 2];
+
+              // VHS Color Bleed/Shift on skewed parts
+              if (isSkewed && skew > 30) {
+                r = (r + 40 * skewIntensity) % 256;
+                b = (b + 20 * skewIntensity) % 256;
               }
+
+              // Analog Grain/Noise
+              if (skew > 50 && Math.random() < 0.15 * skewIntensity) {
+                const noise = (Math.random() - 0.5) * 130 * skewIntensity;
+                r = Math.min(255, Math.max(0, r + noise));
+                g = Math.min(255, Math.max(0, g + noise));
+                b = Math.min(255, Math.max(0, b + noise));
+              }
+              
+              // CRT Scanline effect
+              if (skew > 60 && y % 2 === 0) {
+                const darken = 0.85 + (1 - skewIntensity) * 0.1;
+                r *= darken; g *= darken; b *= darken;
+              }
+
+              newData[targetIdx] = r;
+              newData[targetIdx + 1] = g;
+              newData[targetIdx + 2] = b;
+              newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
             }
           }
           ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
@@ -337,6 +373,11 @@ export default function App() {
           const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const newData = new Uint8ClampedArray(tempImageData.data);
           
+          // Use a lower probability but longer length to avoid "blurring" look at high levels
+          const threshold = 255 * (1 - (driftIntensity * 0.8));
+          const driftProb = 0.02 + (driftIntensity * 0.08);
+          const maxDriftLen = Math.floor(20 + (driftIntensity * 180));
+
           for (let y = 0; y < canvas.height; y++) {
             for (let x = 0; x < canvas.width; x++) {
               const idx = (y * canvas.width + x) * 4;
@@ -345,17 +386,20 @@ export default function App() {
               const b = tempImageData.data[idx + 2];
               const brightness = (r + g + b) / 3;
               
-              if (brightness > 255 * (1 - driftIntensity)) {
-                const driftLen = Math.floor(Math.random() * 20 * driftIntensity);
+              if (brightness > threshold && Math.random() < driftProb) {
+                const driftLen = Math.floor(Math.random() * maxDriftLen);
                 for (let d = 1; d <= driftLen; d++) {
                   const targetX = x + d;
                   if (targetX < canvas.width) {
                     const tIdx = (y * canvas.width + targetX) * 4;
+                    // Blend slightly for smoother streaks
                     newData[tIdx] = r;
                     newData[tIdx + 1] = g;
                     newData[tIdx + 2] = b;
                   }
                 }
+                // Skip ahead to avoid overlapping too much
+                x += Math.floor(driftLen * 0.5);
               }
             }
           }
@@ -365,21 +409,26 @@ export default function App() {
         // 6.8 Mosh (Block Displacement)
         if (mosh > 0) {
           const moshIntensity = mosh / 100;
-          const blockSize = 16;
+          const blockSize = Math.floor(16 + (moshIntensity * 48));
           const cols = Math.floor(canvas.width / blockSize);
           const rows = Math.floor(canvas.height / blockSize);
+          const moveProb = 0.05 + (moshIntensity * 0.3);
           
           for (let r = 0; r < rows; r++) {
             for (let c = 0; c < cols; c++) {
-              if (Math.random() < 0.1 * moshIntensity) {
+              if (Math.random() < moveProb) {
                 const x = c * blockSize;
                 const y = r * blockSize;
-                const offsetX = (Math.random() - 0.5) * 40 * moshIntensity;
-                const offsetY = (Math.random() - 0.5) * 40 * moshIntensity;
+                const offsetX = (Math.random() - 0.5) * 120 * moshIntensity;
+                const offsetY = (Math.random() - 0.5) * 60 * moshIntensity;
                 
                 try {
                   const block = ctx.getImageData(x, y, blockSize, blockSize);
+                  // Sometimes repeat the block for more "mosh" feel
                   ctx.putImageData(block, x + offsetX, y + offsetY);
+                  if (moshIntensity > 0.7 && Math.random() < 0.3) {
+                    ctx.putImageData(block, x + offsetX * 1.5, y + offsetY * 1.5);
+                  }
                 } catch (e) {}
               }
             }
@@ -484,18 +533,28 @@ export default function App() {
               <h2 className="font-bold uppercase tracking-wider">Parameters</h2>
             </div>
             
-            <div className="flex items-center p-1 bg-black/40 rounded-lg w-fit border border-vapor-purple/30">
+            <div className="flex items-center gap-4">
+              <div className="flex items-center p-1 bg-black/40 rounded-lg w-fit border border-vapor-purple/30">
+                <button 
+                  onClick={() => setIsAdvancedMode(false)}
+                  className={`px-3 py-1 text-[10px] font-mono uppercase tracking-tighter rounded transition-all ${!isAdvancedMode ? 'bg-vapor-purple text-white shadow-[0_0_10px_rgba(191,100,255,0.5)]' : 'text-vapor-blue/50 hover:text-vapor-blue'}`}
+                >
+                  Casual
+                </button>
+                <button 
+                  onClick={() => setIsAdvancedMode(true)}
+                  className={`px-3 py-1 text-[10px] font-mono uppercase tracking-tighter rounded transition-all ${isAdvancedMode ? 'bg-vapor-pink text-white shadow-[0_0_10px_rgba(255,113,206,0.5)]' : 'text-vapor-blue/50 hover:text-vapor-blue'}`}
+                >
+                  Haxxor
+                </button>
+              </div>
+
               <button 
-                onClick={() => setIsAdvancedMode(false)}
-                className={`px-3 py-1 text-[10px] font-mono uppercase tracking-tighter rounded transition-all ${!isAdvancedMode ? 'bg-vapor-purple text-white shadow-[0_0_10px_rgba(191,100,255,0.5)]' : 'text-vapor-blue/50 hover:text-vapor-blue'}`}
+                onClick={resetSliders}
+                className="text-[10px] font-mono uppercase tracking-tighter text-vapor-blue/60 hover:text-vapor-pink transition-colors flex items-center gap-1"
               >
-                Casual
-              </button>
-              <button 
-                onClick={() => setIsAdvancedMode(true)}
-                className={`px-3 py-1 text-[10px] font-mono uppercase tracking-tighter rounded transition-all ${isAdvancedMode ? 'bg-vapor-pink text-white shadow-[0_0_10px_rgba(255,113,206,0.5)]' : 'text-vapor-blue/50 hover:text-vapor-blue'}`}
-              >
-                Haxxor
+                <RefreshCw size={10} />
+                Reset
               </button>
             </div>
           </div>
