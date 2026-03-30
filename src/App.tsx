@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, RefreshCw, Download, Zap, Sliders, Image as ImageIcon } from 'lucide-react';
+import { Upload, RefreshCw, Download, Zap, Sliders, Image as ImageIcon, Lock, Unlock } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 
 export default function App() {
@@ -12,11 +12,22 @@ export default function App() {
   const [glitchLevel, setGlitchLevel] = useState(0);
   const [saturation, setSaturation] = useState(100);
   const [distortion, setDistortion] = useState(0);
+  const [chromaticAberration, setChromaticAberration] = useState(0);
   const [droop, setDroop] = useState(0);
   const [colorShift, setColorShift] = useState(0);
-  const [errorLevel, setErrorLevel] = useState(0);
-  const [quality, setQuality] = useState(100);
+  const [corruptionLevel, setCorruptionLevel] = useState(0);
+  const [sharpness, setSharpness] = useState(100);
   const [isGlitching, setIsGlitching] = useState(false);
+  const [locked, setLocked] = useState({
+    glitchLevel: false,
+    saturation: false,
+    distortion: false,
+    chromaticAberration: false,
+    droop: false,
+    colorShift: false,
+    corruptionLevel: false,
+    sharpness: false,
+  });
   const [glitchedImage, setGlitchedImage] = useState<string | null>(null);
   const [controlsHeight, setControlsHeight] = useState<number | null>(null);
 
@@ -30,10 +41,10 @@ export default function App() {
     if (image) {
       const timer = setTimeout(() => {
         applyGlitch();
-      }, 50); // Small debounce for performance
+      }, 150); // Increased debounce for better performance on rapid changes
       return () => clearTimeout(timer);
     }
-  }, [image, glitchLevel, saturation, distortion, droop, colorShift, errorLevel, quality]);
+  }, [image, glitchLevel, saturation, distortion, chromaticAberration, droop, colorShift, corruptionLevel, sharpness]);
 
   // Sync preview height with controls height
   useEffect(() => {
@@ -49,6 +60,10 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
 
+  const toggleLock = (key: keyof typeof locked) => {
+    setLocked(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
@@ -62,10 +77,11 @@ export default function App() {
         setGlitchLevel(0);
         setSaturation(100);
         setDistortion(0);
+        setChromaticAberration(0);
         setDroop(0);
         setColorShift(0);
-        setErrorLevel(0);
-        setQuality(100);
+        setCorruptionLevel(0);
+        setSharpness(100);
 
         const img = new Image();
         img.onload = () => {
@@ -78,225 +94,286 @@ export default function App() {
   };
 
   const randomize = () => {
-    setGlitchLevel(Math.floor(Math.random() * 100));
-    setSaturation(Math.floor(Math.random() * 300));
-    setDistortion(Math.floor(Math.random() * 100));
-    setDroop(Math.floor(Math.random() * 100));
-    setColorShift(Math.floor(Math.random() * 100));
-    setErrorLevel(Math.floor(Math.random() * 100));
-    setQuality(Math.floor(Math.random() * 100));
+    if (!locked.glitchLevel) setGlitchLevel(Math.floor(Math.random() * 100));
+    if (!locked.saturation) setSaturation(Math.floor(Math.random() * 300));
+    if (!locked.distortion) setDistortion(Math.floor(Math.random() * 100));
+    if (!locked.chromaticAberration) setChromaticAberration(Math.floor(Math.random() * 100));
+    if (!locked.droop) setDroop(Math.floor(Math.random() * 100));
+    if (!locked.colorShift) setColorShift(Math.floor(Math.random() * 100));
+    if (!locked.corruptionLevel) setCorruptionLevel(Math.floor(Math.random() * 100));
+    if (!locked.sharpness) setSharpness(Math.floor(Math.random() * 200));
   };
 
   const applyGlitch = () => {
-    if (!image || !canvasRef.current || !sourceImageRef.current) return;
+    if (!image || !canvasRef.current || !sourceImageRef.current || isGlitching) return;
 
     setIsGlitching(true);
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
-    if (!ctx) return;
-
-    const img = sourceImageRef.current;
-    const maxWidth = 1200;
-    const scale = Math.min(1, maxWidth / img.width);
-    canvas.width = img.width * scale;
-    canvas.height = img.height * scale;
-
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
     
-    let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    let data = imageData.data;
+    // Use a small timeout to allow the UI to update to "Processing" state before blocking the main thread
+    setTimeout(() => {
+      try {
+        const canvas = canvasRef.current!;
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        if (!ctx) return;
 
-    // 1. Color Saturation & Color Shift
-    const satFactor = saturation / 100;
-    const shiftIntensity = colorShift / 100;
-    
-    for (let i = 0; i < data.length; i += 4) {
-      let r = data[i];
-      let g = data[i + 1];
-      let b = data[i + 2];
+        const img = sourceImageRef.current!;
+        const maxWidth = 1200;
+        const scale = Math.min(1, maxWidth / img.width);
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
 
-      if (colorShift > 0) {
-        const rOrig = r;
-        const gOrig = g;
-        const bOrig = b;
-        r = (rOrig * (1 - shiftIntensity) + bOrig * shiftIntensity) % 256;
-        g = (gOrig * (1 - shiftIntensity) + rOrig * shiftIntensity) % 256;
-        b = (bOrig * (1 - shiftIntensity) + gOrig * shiftIntensity) % 256;
-
-        if (shiftIntensity > 0.4) {
-          if (rOrig > 150 && bOrig > 150) { r = 0; g = 255 * shiftIntensity; b = 0; }
-          else if (rOrig > 100 && rOrig < 200) { r = 150 * shiftIntensity; g = 0; b = 0; }
+        // Apply Blur if sharpness < 100
+        if (sharpness < 100) {
+          const blurAmount = (100 - sharpness) / 10;
+          ctx.filter = `blur(${blurAmount}px)`;
         }
-        if (shiftIntensity > 0.7) {
-          const brightness = (rOrig + gOrig + bOrig) / 3;
-          if (brightness > 200) { r = 255 - r; g = 255 - g; b = 255 - b; }
+
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        ctx.filter = 'none';
+
+        // Apply Sharpening if sharpness > 100 (using overlay blend mode trick)
+        if (sharpness > 100) {
+          const sharpenIntensity = (sharpness - 100) / 100;
+          ctx.globalCompositeOperation = 'overlay';
+          ctx.globalAlpha = sharpenIntensity;
+          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+          ctx.globalCompositeOperation = 'source-over';
+          ctx.globalAlpha = 1.0;
         }
-      }
+        
+        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        let data = imageData.data;
 
-      const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-      data[i] = Math.min(255, Math.max(0, gray + (r - gray) * satFactor));
-      data[i + 1] = Math.min(255, Math.max(0, gray + (g - gray) * satFactor));
-      data[i + 2] = Math.min(255, Math.max(0, gray + (b - gray) * satFactor));
-    }
-    ctx.putImageData(imageData, 0, 0);
+        // 1. Color Saturation & Color Shift
+        const satFactor = saturation / 100;
+        const shiftIntensity = colorShift / 100;
+        
+        for (let i = 0; i < data.length; i += 4) {
+          let r = data[i];
+          let g = data[i + 1];
+          let b = data[i + 2];
 
-    // 2. Droop
-    if (droop > 0) {
-      const droopIntensity = (droop / 100);
-      const droopCount = Math.floor(canvas.width * 0.15 * droopIntensity);
-      for (let i = 0; i < droopCount; i++) {
-        const x = Math.floor(Math.random() * canvas.width);
-        const yStart = Math.floor(Math.random() * canvas.height);
-        const droopLen = Math.floor(Math.random() * (canvas.height - yStart) * (droop / 100));
-        const droopWidth = Math.floor(Math.random() * (droop / 5)) + 2;
-        if (droopLen > 0) {
-          try {
-            const slice = ctx.getImageData(x, yStart, droopWidth, 1);
-            for (let y = yStart; y < yStart + droopLen; y++) {
-              if (y < canvas.height) {
-                const drift = Math.sin(y * 0.05) * (droop / 40);
-                ctx.putImageData(slice, x + drift, y);
+          if (colorShift > 0) {
+            const rOrig = r;
+            const gOrig = g;
+            const bOrig = b;
+            r = (rOrig * (1 - shiftIntensity) + bOrig * shiftIntensity) % 256;
+            g = (gOrig * (1 - shiftIntensity) + rOrig * shiftIntensity) % 256;
+            b = (bOrig * (1 - shiftIntensity) + gOrig * shiftIntensity) % 256;
+
+            if (shiftIntensity > 0.4) {
+              if (rOrig > 150 && bOrig > 150) { r = 0; g = 255 * shiftIntensity; b = 0; }
+              else if (rOrig > 100 && rOrig < 200) { r = 150 * shiftIntensity; g = 0; b = 0; }
+            }
+            if (shiftIntensity > 0.7) {
+              const brightness = (rOrig + gOrig + bOrig) / 3;
+              if (brightness > 200) { r = 255 - r; g = 255 - g; b = 255 - b; }
+            }
+          }
+
+          const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
+          data[i] = Math.min(255, Math.max(0, gray + (r - gray) * satFactor));
+          data[i + 1] = Math.min(255, Math.max(0, gray + (g - gray) * satFactor));
+          data[i + 2] = Math.min(255, Math.max(0, gray + (b - gray) * satFactor));
+        }
+        ctx.putImageData(imageData, 0, 0);
+
+        // 1.5 Chromatic Aberration
+        if (chromaticAberration > 0) {
+          const offset = Math.floor((chromaticAberration / 100) * 25);
+          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const newData = new Uint8ClampedArray(tempImageData.data);
+          
+          for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+              const idx = (y * canvas.width + x) * 4;
+              
+              // Shift Red channel to the right
+              const rX = Math.min(canvas.width - 1, Math.max(0, x + offset));
+              const rIdx = (y * canvas.width + rX) * 4;
+              newData[idx] = tempImageData.data[rIdx];
+              
+              // Keep Green channel as is
+              newData[idx + 1] = tempImageData.data[idx + 1];
+              
+              // Shift Blue channel to the left
+              const bX = Math.min(canvas.width - 1, Math.max(0, x - offset));
+              const bIdx = (y * canvas.width + bX) * 4;
+              newData[idx + 2] = tempImageData.data[bIdx + 2];
+              
+              // Keep Alpha
+              newData[idx + 3] = tempImageData.data[idx + 3];
+            }
+          }
+          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
+        }
+
+        // 2. Droop
+        if (droop > 0) {
+          const droopIntensity = (droop / 100);
+          const droopCount = Math.floor(canvas.width * 0.15 * droopIntensity);
+          for (let i = 0; i < droopCount; i++) {
+            const x = Math.floor(Math.random() * canvas.width);
+            const yStart = Math.floor(Math.random() * canvas.height);
+            const droopLen = Math.floor(Math.random() * (canvas.height - yStart) * (droop / 100));
+            const droopWidth = Math.floor(Math.random() * (droop / 5)) + 2;
+            if (droopLen > 0) {
+              try {
+                const slice = ctx.getImageData(x, yStart, droopWidth, 1);
+                for (let y = yStart; y < yStart + droopLen; y++) {
+                  if (y < canvas.height) {
+                    const drift = Math.sin(y * 0.05) * (droop / 40);
+                    ctx.putImageData(slice, x + drift, y);
+                  }
+                }
+              } catch (e) {}
+            }
+          }
+        }
+
+        // 3. RGB Split
+        if (distortion > 0) {
+          const distortionScale = 0.44;
+          const offset = Math.floor((distortion / 100) * 30 * distortionScale);
+          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const newData = new Uint8ClampedArray(tempImageData.data);
+          for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+              const idx = (y * canvas.width + x) * 4;
+              const rX = Math.min(canvas.width - 1, Math.max(0, x + offset));
+              const rIdx = (y * canvas.width + rX) * 4;
+              newData[idx] = tempImageData.data[rIdx];
+              const bX = Math.min(canvas.width - 1, Math.max(0, x - offset));
+              const bIdx = (y * canvas.width + bX) * 4;
+              newData[idx + 2] = tempImageData.data[bIdx + 2];
+            }
+          }
+          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
+        }
+
+        // 4. Scanline Glitch
+        if (glitchLevel > 0) {
+          const glitchCount = Math.floor((glitchLevel / 100) * 40);
+          for (let i = 0; i < glitchCount; i++) {
+            const y = Math.floor(Math.random() * canvas.height);
+            const h = Math.floor(Math.random() * (canvas.height / 8)) + 2;
+            const xOffset = (Math.random() - 0.5) * (glitchLevel / 100) * canvas.width * 0.4;
+            try {
+              const slice = ctx.getImageData(0, y, canvas.width, h);
+              ctx.putImageData(slice, xOffset, y);
+            } catch (e) {}
+          }
+        }
+
+        // 5. Random Color Blocks
+        if (glitchLevel > 30) {
+          const blockCount = Math.floor((glitchLevel / 100) * 15);
+          for (let i = 0; i < blockCount; i++) {
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            const w = Math.random() * canvas.width * 0.4;
+            const h = Math.random() * 30;
+            const r = Math.random() * 255;
+            const g = Math.random() * 255;
+            const b = Math.random() * 255;
+            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.4)`;
+            ctx.fillRect(x, y, w, h);
+            ctx.strokeStyle = `rgba(${g}, ${b}, ${r}, 0.8)`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(x, y);
+            ctx.lineTo(x + w, y + h);
+            ctx.stroke();
+          }
+        }
+
+        // 6. Sine Wave Distortion
+        if (distortion > 40) {
+          const distortionScale = 0.44;
+          const waveAmp = (distortion / 100) * 40 * distortionScale;
+          const waveFreq = 0.02 + (distortion / 100) * 0.1;
+          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const newData = new Uint8ClampedArray(tempImageData.data);
+          for (let y = 0; y < canvas.height; y++) {
+            const xOffset = Math.sin(y * waveFreq) * waveAmp;
+            for (let x = 0; x < canvas.width; x++) {
+              const sourceX = Math.floor(x + xOffset);
+              if (sourceX >= 0 && sourceX < canvas.width) {
+                const targetIdx = (y * canvas.width + x) * 4;
+                const sourceIdx = (y * canvas.width + sourceX) * 4;
+                newData[targetIdx] = tempImageData.data[sourceIdx];
+                newData[targetIdx + 1] = tempImageData.data[sourceIdx + 1];
+                newData[targetIdx + 2] = tempImageData.data[sourceIdx + 2];
+                newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
               }
             }
-          } catch (e) {}
+          }
+          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
         }
-      }
-    }
 
-    // 3. RGB Split
-    if (distortion > 0) {
-      const distortionScale = 0.44;
-      const offset = Math.floor((distortion / 100) * 30 * distortionScale);
-      const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const newData = new Uint8ClampedArray(tempImageData.data);
-      for (let y = 0; y < canvas.height; y++) {
-        for (let x = 0; x < canvas.width; x++) {
-          const idx = (y * canvas.width + x) * 4;
-          const rX = Math.min(canvas.width - 1, Math.max(0, x + offset));
-          const rIdx = (y * canvas.width + rX) * 4;
-          newData[idx] = tempImageData.data[rIdx];
-          const bX = Math.min(canvas.width - 1, Math.max(0, x - offset));
-          const bIdx = (y * canvas.width + bX) * 4;
-          newData[idx + 2] = tempImageData.data[bIdx + 2];
-        }
-      }
-      ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
-    }
-
-    // 4. Scanline Glitch
-    if (glitchLevel > 0) {
-      const glitchCount = Math.floor((glitchLevel / 100) * 40);
-      for (let i = 0; i < glitchCount; i++) {
-        const y = Math.floor(Math.random() * canvas.height);
-        const h = Math.floor(Math.random() * (canvas.height / 8)) + 2;
-        const xOffset = (Math.random() - 0.5) * (glitchLevel / 100) * canvas.width * 0.4;
-        try {
-          const slice = ctx.getImageData(0, y, canvas.width, h);
-          ctx.putImageData(slice, xOffset, y);
-        } catch (e) {}
-      }
-    }
-
-    // 5. Random Color Blocks
-    if (glitchLevel > 30) {
-      const blockCount = Math.floor((glitchLevel / 100) * 15);
-      for (let i = 0; i < blockCount; i++) {
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        const w = Math.random() * canvas.width * 0.4;
-        const h = Math.random() * 30;
-        const r = Math.random() * 255;
-        const g = Math.random() * 255;
-        const b = Math.random() * 255;
-        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.4)`;
-        ctx.fillRect(x, y, w, h);
-        ctx.strokeStyle = `rgba(${g}, ${b}, ${r}, 0.8)`;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(x + w, y + h);
-        ctx.stroke();
-      }
-    }
-
-    // 6. Sine Wave Distortion
-    if (distortion > 40) {
-      const distortionScale = 0.44;
-      const waveAmp = (distortion / 100) * 40 * distortionScale;
-      const waveFreq = 0.02 + (distortion / 100) * 0.1;
-      const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      const newData = new Uint8ClampedArray(tempImageData.data);
-      for (let y = 0; y < canvas.height; y++) {
-        const xOffset = Math.sin(y * waveFreq) * waveAmp;
-        for (let x = 0; x < canvas.width; x++) {
-          const sourceX = Math.floor(x + xOffset);
-          if (sourceX >= 0 && sourceX < canvas.width) {
-            const targetIdx = (y * canvas.width + x) * 4;
-            const sourceIdx = (y * canvas.width + sourceX) * 4;
-            newData[targetIdx] = tempImageData.data[sourceIdx];
-            newData[targetIdx + 1] = tempImageData.data[sourceIdx + 1];
-            newData[targetIdx + 2] = tempImageData.data[sourceIdx + 2];
-            newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
+        // 7. Error & Corruption Artifacts
+        if (corruptionLevel > 0) {
+          const artifactCount = Math.floor((corruptionLevel / 100) * 15);
+          for (let i = 0; i < artifactCount; i++) {
+            const type = Math.random();
+            const x = Math.random() * canvas.width;
+            const y = Math.random() * canvas.height;
+            if (type < 0.4) {
+              ctx.fillStyle = '#00ff00';
+              ctx.fillRect(x, y, Math.random() * 120, Math.random() * 80);
+            } else if (type < 0.7) {
+              ctx.fillStyle = '#000000';
+              ctx.fillRect(x, y, Math.random() * 200, Math.random() * 40);
+            } else {
+              const noiseSize = 50;
+              const noiseData = ctx.createImageData(noiseSize, noiseSize);
+              for (let j = 0; j < noiseData.data.length; j += 4) {
+                const val = Math.random() * 255;
+                noiseData.data[j] = val; noiseData.data[j+1] = val; noiseData.data[j+2] = val; noiseData.data[j+3] = 255;
+              }
+              ctx.putImageData(noiseData, x, y);
+            }
           }
         }
-      }
-      ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
-    }
 
-    // 7. Error Artifacts
-    if (errorLevel > 0) {
-      const artifactCount = Math.floor((errorLevel / 100) * 15);
-      for (let i = 0; i < artifactCount; i++) {
-        const type = Math.random();
-        const x = Math.random() * canvas.width;
-        const y = Math.random() * canvas.height;
-        if (type < 0.4) {
-          ctx.fillStyle = '#00ff00';
-          ctx.fillRect(x, y, Math.random() * 120, Math.random() * 80);
-        } else if (type < 0.7) {
-          ctx.fillStyle = '#000000';
-          ctx.fillRect(x, y, Math.random() * 200, Math.random() * 40);
+        // 8. JPEG Corruption (moved from Quality)
+        if (corruptionLevel > 20) {
+          // Lower quality as corruption increases
+          const q = Math.max(0.01, 1 - (corruptionLevel / 100));
+          const jpegDataUrl = canvas.toDataURL('image/jpeg', q);
+          
+          // If corruption is high, we also corrupt the bytes
+          if (corruptionLevel > 60) {
+            const base64 = jpegDataUrl.split(',')[1];
+            const binary = atob(base64);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+            
+            // Corrupt bytes based on intensity
+            const corruptionIntensity = Math.floor((corruptionLevel - 60) / 2);
+            for (let i = 0; i < corruptionIntensity; i++) {
+              const pos = Math.floor(Math.random() * (bytes.length - 1000)) + 500;
+              bytes[pos] = Math.floor(Math.random() * 256);
+            }
+
+            let binaryString = '';
+            for (let i = 0; i < bytes.length; i++) {
+              binaryString += String.fromCharCode(bytes[i]);
+            }
+            const corruptedBase64 = btoa(binaryString);
+            setGlitchedImage(`data:image/jpeg;base64,${corruptedBase64}`);
+          } else {
+            setGlitchedImage(jpegDataUrl);
+          }
         } else {
-          const noiseSize = 50;
-          const noiseData = ctx.createImageData(noiseSize, noiseSize);
-          for (let j = 0; j < noiseData.data.length; j += 4) {
-            const val = Math.random() * 255;
-            noiseData.data[j] = val; noiseData.data[j+1] = val; noiseData.data[j+2] = val; noiseData.data[j+3] = 255;
-          }
-          ctx.putImageData(noiseData, x, y);
+          setGlitchedImage(canvas.toDataURL('image/png'));
         }
+      } catch (err) {
+        console.error("Glitch processing error:", err);
+      } finally {
+        setIsGlitching(false);
       }
-    }
-
-    // 8. JPEG Quality Glitch (Snorpey style)
-    if (quality < 100) {
-      const q = quality / 100;
-      const jpegDataUrl = canvas.toDataURL('image/jpeg', q);
-      
-      // If quality is very low, we can also corrupt the bytes
-      if (quality < 50) {
-        const base64 = jpegDataUrl.split(',')[1];
-        const binary = atob(base64);
-        const bytes = new Uint8Array(binary.length);
-        for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        
-        // Corrupt a few bytes in the middle of the file (avoiding header)
-        const corruptionIntensity = Math.floor((50 - quality) / 5);
-        for (let i = 0; i < corruptionIntensity; i++) {
-          const pos = Math.floor(Math.random() * (bytes.length - 1000)) + 500;
-          bytes[pos] = Math.floor(Math.random() * 256);
-        }
-
-        const corruptedBase64 = btoa(String.fromCharCode(...bytes));
-        setGlitchedImage(`data:image/jpeg;base64,${corruptedBase64}`);
-      } else {
-        setGlitchedImage(jpegDataUrl);
-      }
-    } else {
-      setGlitchedImage(canvas.toDataURL('image/png'));
-    }
-    
-    setIsGlitching(false);
+    }, 10);
   };
 
   const downloadImage = () => {
@@ -333,8 +410,17 @@ export default function App() {
 
           <div className="space-y-6">
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Glitch Level</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('glitchLevel')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.glitchLevel ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.glitchLevel ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.glitchLevel ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Glitch Level</span>
+                </div>
                 <span>{glitchLevel}%</span>
               </div>
               <input 
@@ -348,8 +434,17 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Saturation</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('saturation')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.saturation ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.saturation ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.saturation ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Saturation</span>
+                </div>
                 <span>{saturation}%</span>
               </div>
               <input 
@@ -363,8 +458,17 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Distortion</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('distortion')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.distortion ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.distortion ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.distortion ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Distortion</span>
+                </div>
                 <span>{distortion}%</span>
               </div>
               <input 
@@ -378,8 +482,41 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Droop</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('chromaticAberration')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.chromaticAberration ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.chromaticAberration ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.chromaticAberration ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Chromatic Aberration</span>
+                </div>
+                <span>{chromaticAberration}%</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="100" 
+                value={chromaticAberration} 
+                onChange={(e) => setChromaticAberration(parseInt(e.target.value))}
+                className="vapor-slider"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('droop')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.droop ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.droop ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.droop ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Droop</span>
+                </div>
                 <span>{droop}%</span>
               </div>
               <input 
@@ -393,8 +530,17 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Color Shift</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('colorShift')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.colorShift ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.colorShift ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.colorShift ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Color Shift</span>
+                </div>
                 <span>{colorShift}%</span>
               </div>
               <input 
@@ -408,31 +554,49 @@ export default function App() {
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Error</span>
-                <span>{errorLevel}%</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('corruptionLevel')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.corruptionLevel ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.corruptionLevel ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.corruptionLevel ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Error / Corruption</span>
+                </div>
+                <span>{corruptionLevel}%</span>
               </div>
               <input 
                 type="range" 
                 min="0" 
                 max="100" 
-                value={errorLevel} 
-                onChange={(e) => setErrorLevel(parseInt(e.target.value))}
+                value={corruptionLevel} 
+                onChange={(e) => setCorruptionLevel(parseInt(e.target.value))}
                 className="vapor-slider"
               />
             </div>
 
             <div className="space-y-2">
-              <div className="flex justify-between text-xs font-mono text-vapor-blue uppercase">
-                <span>Quality</span>
-                <span>{quality}%</span>
+              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                <div className="flex items-center gap-2">
+                  <button 
+                    onClick={() => toggleLock('sharpness')}
+                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.sharpness ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                    title={locked.sharpness ? "Unlock from Randomization" : "Lock from Randomization"}
+                  >
+                    {locked.sharpness ? <Lock size={12} /> : <Unlock size={12} />}
+                  </button>
+                  <span>Sharpness</span>
+                </div>
+                <span>{sharpness}%</span>
               </div>
               <input 
                 type="range" 
-                min="1" 
-                max="100" 
-                value={quality} 
-                onChange={(e) => setQuality(parseInt(e.target.value))}
+                min="0" 
+                max="200" 
+                value={sharpness} 
+                onChange={(e) => setSharpness(parseInt(e.target.value))}
                 className="vapor-slider"
               />
             </div>
@@ -441,9 +605,10 @@ export default function App() {
           <div className="pt-4 flex flex-col gap-4">
             <button 
               onClick={randomize}
-              className="vapor-button py-2 px-4 flex items-center justify-center gap-2 text-sm"
+              disabled={isGlitching}
+              className="vapor-button py-2 px-4 flex items-center justify-center gap-2 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <RefreshCw size={16} />
+              <RefreshCw size={16} className={isGlitching ? "animate-spin" : ""} />
               Randomize
             </button>
             
