@@ -11,17 +11,24 @@ export default function App() {
   const [image, setImage] = useState<string | null>(null);
   const [glitchLevel, setGlitchLevel] = useState(0);
   const [saturation, setSaturation] = useState(100);
-  const [distortion, setDistortion] = useState(0);
+  const [drift, setDrift] = useState(0);
+  const [mosh, setMosh] = useState(0);
+  const [jitter, setJitter] = useState(0);
+  const [skew, setSkew] = useState(0);
   const [chromaticAberration, setChromaticAberration] = useState(0);
   const [droop, setDroop] = useState(0);
   const [colorShift, setColorShift] = useState(0);
   const [corruptionLevel, setCorruptionLevel] = useState(0);
   const [sharpness, setSharpness] = useState(100);
+  const [isAdvancedMode, setIsAdvancedMode] = useState(false);
   const [isGlitching, setIsGlitching] = useState(false);
   const [locked, setLocked] = useState({
     glitchLevel: false,
     saturation: false,
-    distortion: false,
+    drift: false,
+    mosh: false,
+    jitter: false,
+    skew: false,
     chromaticAberration: false,
     droop: false,
     colorShift: false,
@@ -44,7 +51,7 @@ export default function App() {
       }, 150); // Increased debounce for better performance on rapid changes
       return () => clearTimeout(timer);
     }
-  }, [image, glitchLevel, saturation, distortion, chromaticAberration, droop, colorShift, corruptionLevel, sharpness]);
+  }, [image, glitchLevel, saturation, drift, mosh, jitter, skew, chromaticAberration, droop, colorShift, corruptionLevel, sharpness]);
 
   // Sync preview height with controls height
   useEffect(() => {
@@ -76,7 +83,10 @@ export default function App() {
         // Reset sliders as requested
         setGlitchLevel(0);
         setSaturation(100);
-        setDistortion(0);
+        setDrift(0);
+        setMosh(0);
+        setJitter(0);
+        setSkew(0);
         setChromaticAberration(0);
         setDroop(0);
         setColorShift(0);
@@ -96,7 +106,10 @@ export default function App() {
   const randomize = () => {
     if (!locked.glitchLevel) setGlitchLevel(Math.floor(Math.random() * 100));
     if (!locked.saturation) setSaturation(Math.floor(Math.random() * 300));
-    if (!locked.distortion) setDistortion(Math.floor(Math.random() * 100));
+    if (!locked.drift) setDrift(Math.floor(Math.random() * 100));
+    if (!locked.mosh) setMosh(Math.floor(Math.random() * 100));
+    if (!locked.jitter) setJitter(Math.floor(Math.random() * 100));
+    if (!locked.skew) setSkew(Math.floor(Math.random() * 100));
     if (!locked.chromaticAberration) setChromaticAberration(Math.floor(Math.random() * 100));
     if (!locked.droop) setDroop(Math.floor(Math.random() * 100));
     if (!locked.colorShift) setColorShift(Math.floor(Math.random() * 100));
@@ -231,21 +244,21 @@ export default function App() {
           }
         }
 
-        // 3. RGB Split
-        if (distortion > 0) {
-          const distortionScale = 0.44;
-          const offset = Math.floor((distortion / 100) * 30 * distortionScale);
+        // 3. Jitter (Interlace Jitter)
+        if (jitter > 0) {
+          const jitterAmount = Math.floor((jitter / 100) * 20);
           const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const newData = new Uint8ClampedArray(tempImageData.data);
           for (let y = 0; y < canvas.height; y++) {
+            const offset = (y % 2 === 0 ? 1 : -1) * jitterAmount;
             for (let x = 0; x < canvas.width; x++) {
-              const idx = (y * canvas.width + x) * 4;
-              const rX = Math.min(canvas.width - 1, Math.max(0, x + offset));
-              const rIdx = (y * canvas.width + rX) * 4;
-              newData[idx] = tempImageData.data[rIdx];
-              const bX = Math.min(canvas.width - 1, Math.max(0, x - offset));
-              const bIdx = (y * canvas.width + bX) * 4;
-              newData[idx + 2] = tempImageData.data[bIdx + 2];
+              const sourceX = (x + offset + canvas.width) % canvas.width;
+              const targetIdx = (y * canvas.width + x) * 4;
+              const sourceIdx = (y * canvas.width + sourceX) * 4;
+              newData[targetIdx] = tempImageData.data[sourceIdx];
+              newData[targetIdx + 1] = tempImageData.data[sourceIdx + 1];
+              newData[targetIdx + 2] = tempImageData.data[sourceIdx + 2];
+              newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
             }
           }
           ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
@@ -287,17 +300,24 @@ export default function App() {
           }
         }
 
-        // 6. Sine Wave Distortion
-        if (distortion > 40) {
-          const distortionScale = 0.44;
-          const waveAmp = (distortion / 100) * 40 * distortionScale;
-          const waveFreq = 0.02 + (distortion / 100) * 0.1;
+        // 6. Skew (VHS Tracking Error)
+        if (skew > 0) {
+          const skewIntensity = skew / 100;
+          const maxSkew = skewIntensity * 100;
           const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
           const newData = new Uint8ClampedArray(tempImageData.data);
+          
+          let currentSkew = 0;
           for (let y = 0; y < canvas.height; y++) {
-            const xOffset = Math.sin(y * waveFreq) * waveAmp;
+            // Occasional tearing/reset
+            if (Math.random() < 0.02 * skewIntensity) {
+              currentSkew = (Math.random() - 0.5) * maxSkew * 2;
+            }
+            
+            const rowSkew = currentSkew + (y / canvas.height) * (skewIntensity * 40);
+            
             for (let x = 0; x < canvas.width; x++) {
-              const sourceX = Math.floor(x + xOffset);
+              const sourceX = Math.floor(x + rowSkew);
               if (sourceX >= 0 && sourceX < canvas.width) {
                 const targetIdx = (y * canvas.width + x) * 4;
                 const sourceIdx = (y * canvas.width + sourceX) * 4;
@@ -309,6 +329,61 @@ export default function App() {
             }
           }
           ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
+        }
+
+        // 6.5 Drift (Pixel Drift)
+        if (drift > 0) {
+          const driftIntensity = drift / 100;
+          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const newData = new Uint8ClampedArray(tempImageData.data);
+          
+          for (let y = 0; y < canvas.height; y++) {
+            for (let x = 0; x < canvas.width; x++) {
+              const idx = (y * canvas.width + x) * 4;
+              const r = tempImageData.data[idx];
+              const g = tempImageData.data[idx + 1];
+              const b = tempImageData.data[idx + 2];
+              const brightness = (r + g + b) / 3;
+              
+              if (brightness > 255 * (1 - driftIntensity)) {
+                const driftLen = Math.floor(Math.random() * 20 * driftIntensity);
+                for (let d = 1; d <= driftLen; d++) {
+                  const targetX = x + d;
+                  if (targetX < canvas.width) {
+                    const tIdx = (y * canvas.width + targetX) * 4;
+                    newData[tIdx] = r;
+                    newData[tIdx + 1] = g;
+                    newData[tIdx + 2] = b;
+                  }
+                }
+              }
+            }
+          }
+          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
+        }
+
+        // 6.8 Mosh (Block Displacement)
+        if (mosh > 0) {
+          const moshIntensity = mosh / 100;
+          const blockSize = 16;
+          const cols = Math.floor(canvas.width / blockSize);
+          const rows = Math.floor(canvas.height / blockSize);
+          
+          for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+              if (Math.random() < 0.1 * moshIntensity) {
+                const x = c * blockSize;
+                const y = r * blockSize;
+                const offsetX = (Math.random() - 0.5) * 40 * moshIntensity;
+                const offsetY = (Math.random() - 0.5) * 40 * moshIntensity;
+                
+                try {
+                  const block = ctx.getImageData(x, y, blockSize, blockSize);
+                  ctx.putImageData(block, x + offsetX, y + offsetY);
+                } catch (e) {}
+              }
+            }
+          }
         }
 
         // 7. Error & Corruption Artifacts
@@ -385,7 +460,7 @@ export default function App() {
   };
 
   return (
-    <div className="max-w-4xl mx-auto p-6 flex flex-col items-center gap-8">
+    <div className="max-w-6xl mx-auto p-6 flex flex-col items-center gap-8">
       <header className="text-center space-y-2 mt-8">
         <h1 className="text-6xl font-black italic uppercase tracking-tighter vapor-gradient-text drop-shadow-[0_0_15px_rgba(255,113,206,0.5)]">
           VaporGlittttch
@@ -401,11 +476,28 @@ export default function App() {
           ref={controlsRef}
           initial={{ opacity: 0, x: -20 }}
           animate={{ opacity: 1, x: 0 }}
-          className="space-y-8 bg-vapor-dark/80 p-6 rounded-xl vapor-border backdrop-blur-sm h-fit"
+          className="order-2 md:order-1 space-y-8 bg-vapor-dark/80 p-6 rounded-xl vapor-border backdrop-blur-sm h-fit"
         >
-          <div className="flex items-center gap-2 text-vapor-pink mb-4">
-            <Sliders size={20} />
-            <h2 className="font-bold uppercase tracking-wider">Parameters</h2>
+          <div className="flex flex-col gap-4 mb-4">
+            <div className="flex items-center gap-2 text-vapor-pink">
+              <Sliders size={20} />
+              <h2 className="font-bold uppercase tracking-wider">Parameters</h2>
+            </div>
+            
+            <div className="flex items-center p-1 bg-black/40 rounded-lg w-fit border border-vapor-purple/30">
+              <button 
+                onClick={() => setIsAdvancedMode(false)}
+                className={`px-3 py-1 text-[10px] font-mono uppercase tracking-tighter rounded transition-all ${!isAdvancedMode ? 'bg-vapor-purple text-white shadow-[0_0_10px_rgba(191,100,255,0.5)]' : 'text-vapor-blue/50 hover:text-vapor-blue'}`}
+              >
+                Casual
+              </button>
+              <button 
+                onClick={() => setIsAdvancedMode(true)}
+                className={`px-3 py-1 text-[10px] font-mono uppercase tracking-tighter rounded transition-all ${isAdvancedMode ? 'bg-vapor-pink text-white shadow-[0_0_10px_rgba(255,113,206,0.5)]' : 'text-vapor-blue/50 hover:text-vapor-blue'}`}
+              >
+                Haxxor
+              </button>
+            </div>
           </div>
 
           <div className="space-y-6">
@@ -433,101 +525,187 @@ export default function App() {
               />
             </div>
 
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => toggleLock('saturation')}
-                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.saturation ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
-                    title={locked.saturation ? "Unlock from Randomization" : "Lock from Randomization"}
-                  >
-                    {locked.saturation ? <Lock size={12} /> : <Unlock size={12} />}
-                  </button>
-                  <span>Saturation</span>
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('saturation')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.saturation ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.saturation ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.saturation ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Saturation</span>
+                  </div>
+                  <span>{saturation}%</span>
                 </div>
-                <span>{saturation}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="800" 
+                  value={saturation} 
+                  onChange={(e) => setSaturation(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="800" 
-                value={saturation} 
-                onChange={(e) => setSaturation(parseInt(e.target.value))}
-                className="vapor-slider"
-              />
-            </div>
+            )}
 
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => toggleLock('distortion')}
-                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.distortion ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
-                    title={locked.distortion ? "Unlock from Randomization" : "Lock from Randomization"}
-                  >
-                    {locked.distortion ? <Lock size={12} /> : <Unlock size={12} />}
-                  </button>
-                  <span>Distortion</span>
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('drift')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.drift ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.drift ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.drift ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Drift</span>
+                  </div>
+                  <span>{drift}%</span>
                 </div>
-                <span>{distortion}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={drift} 
+                  onChange={(e) => setDrift(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="100" 
-                value={distortion} 
-                onChange={(e) => setDistortion(parseInt(e.target.value))}
-                className="vapor-slider"
-              />
-            </div>
+            )}
 
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => toggleLock('chromaticAberration')}
-                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.chromaticAberration ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
-                    title={locked.chromaticAberration ? "Unlock from Randomization" : "Lock from Randomization"}
-                  >
-                    {locked.chromaticAberration ? <Lock size={12} /> : <Unlock size={12} />}
-                  </button>
-                  <span>Chromatic Aberration</span>
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('mosh')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.mosh ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.mosh ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.mosh ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Mosh</span>
+                  </div>
+                  <span>{mosh}%</span>
                 </div>
-                <span>{chromaticAberration}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={mosh} 
+                  onChange={(e) => setMosh(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="100" 
-                value={chromaticAberration} 
-                onChange={(e) => setChromaticAberration(parseInt(e.target.value))}
-                className="vapor-slider"
-              />
-            </div>
+            )}
 
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
-                <div className="flex items-center gap-2">
-                  <button 
-                    onClick={() => toggleLock('droop')}
-                    className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.droop ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
-                    title={locked.droop ? "Unlock from Randomization" : "Lock from Randomization"}
-                  >
-                    {locked.droop ? <Lock size={12} /> : <Unlock size={12} />}
-                  </button>
-                  <span>Droop</span>
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('jitter')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.jitter ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.jitter ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.jitter ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Jitter</span>
+                  </div>
+                  <span>{jitter}%</span>
                 </div>
-                <span>{droop}%</span>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={jitter} 
+                  onChange={(e) => setJitter(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
               </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="100" 
-                value={droop} 
-                onChange={(e) => setDroop(parseInt(e.target.value))}
-                className="vapor-slider"
-              />
-            </div>
+            )}
+
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('skew')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.skew ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.skew ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.skew ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Skew</span>
+                  </div>
+                  <span>{skew}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={skew} 
+                  onChange={(e) => setSkew(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
+              </div>
+            )}
+
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('chromaticAberration')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.chromaticAberration ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.chromaticAberration ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.chromaticAberration ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Chromatic Aberration</span>
+                  </div>
+                  <span>{chromaticAberration}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={chromaticAberration} 
+                  onChange={(e) => setChromaticAberration(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
+              </div>
+            )}
+
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('droop')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.droop ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.droop ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.droop ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Droop</span>
+                  </div>
+                  <span>{droop}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={droop} 
+                  onChange={(e) => setDroop(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
+              </div>
+            )}
 
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
@@ -628,7 +806,7 @@ export default function App() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="md:col-span-2 space-y-4"
+          className="order-1 md:order-2 md:col-span-2 space-y-4"
         >
           <div 
             style={{ height: controlsHeight ? `${controlsHeight}px` : 'auto', minHeight: '400px' }}
