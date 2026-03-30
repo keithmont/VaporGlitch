@@ -4,8 +4,27 @@
  */
 
 import React, { useState, useRef, useEffect } from 'react';
-import { Upload, RefreshCw, Download, Zap, Sliders, Image as ImageIcon, Lock, Unlock } from 'lucide-react';
+import { Upload, RefreshCw, Download, Zap, Sliders, Image as ImageIcon, Lock, Unlock, Eye, EyeOff } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
+
+const PRESETS = [
+  {
+    name: 'Deep Fried',
+    params: { glitchLevel: 40, saturation: 400, drift: 20, mosh: 0, jitter: 10, skew: 0, chromaticAberration: 30, droop: 50, colorShift: 80, corruptionLevel: 60, sharpness: 200, pixelSorting: 0, channelXor: 0 }
+  },
+  {
+    name: 'Broken VCR',
+    params: { glitchLevel: 10, saturation: 80, drift: 5, mosh: 0, jitter: 40, skew: 85, chromaticAberration: 20, droop: 10, colorShift: 30, corruptionLevel: 20, sharpness: 70, pixelSorting: 0, channelXor: 0 }
+  },
+  {
+    name: 'Cyberpunk',
+    params: { glitchLevel: 20, saturation: 150, drift: 40, mosh: 30, jitter: 0, skew: 10, chromaticAberration: 60, droop: 0, colorShift: 100, corruptionLevel: 10, sharpness: 120, pixelSorting: 80, channelXor: 40 }
+  },
+  {
+    name: 'Data Decay',
+    params: { glitchLevel: 80, saturation: 120, drift: 10, mosh: 90, jitter: 10, skew: 20, chromaticAberration: 10, droop: 30, colorShift: 20, corruptionLevel: 90, sharpness: 100, pixelSorting: 95, channelXor: 70 }
+  }
+];
 
 export default function App() {
   const [image, setImage] = useState<string | null>(null);
@@ -20,8 +39,13 @@ export default function App() {
   const [colorShift, setColorShift] = useState(0);
   const [corruptionLevel, setCorruptionLevel] = useState(0);
   const [sharpness, setSharpness] = useState(100);
+  const [pixelSorting, setPixelSorting] = useState(0);
+  const [channelXor, setChannelXor] = useState(0);
+
   const [isAdvancedMode, setIsAdvancedMode] = useState(false);
   const [isGlitching, setIsGlitching] = useState(false);
+  const [showOriginal, setShowOriginal] = useState(false);
+
   const [locked, setLocked] = useState({
     glitchLevel: false,
     saturation: false,
@@ -34,6 +58,8 @@ export default function App() {
     colorShift: false,
     corruptionLevel: false,
     sharpness: false,
+    pixelSorting: false,
+    channelXor: false,
   });
   const [glitchedImage, setGlitchedImage] = useState<string | null>(null);
   const [controlsHeight, setControlsHeight] = useState<number | null>(null);
@@ -42,16 +68,68 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const controlsRef = useRef<HTMLElement>(null);
   const sourceImageRef = useRef<HTMLImageElement | null>(null);
+  const workerRef = useRef<Worker | null>(null);
+
+  // Initialize Worker
+  useEffect(() => {
+    workerRef.current = new Worker(new URL('./glitchWorker.ts', import.meta.url), { type: 'module' });
+    
+    workerRef.current.onmessage = (e) => {
+      const { imageData } = e.data;
+      const canvas = canvasRef.current;
+      if (canvas) {
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.putImageData(imageData, 0, 0);
+          
+          // Apply JPEG corruption if needed (this part is hard to do in worker without canvas)
+          if (corruptionLevel > 20) {
+            const q = Math.max(0.01, 1 - (corruptionLevel / 100));
+            const jpegDataUrl = canvas.toDataURL('image/jpeg', q);
+            
+            if (corruptionLevel > 60) {
+              const base64 = jpegDataUrl.split(',')[1];
+              const binary = atob(base64);
+              const bytes = new Uint8Array(binary.length);
+              for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+              
+              const corruptionIntensity = Math.floor((corruptionLevel - 60) / 2);
+              for (let i = 0; i < corruptionIntensity; i++) {
+                const pos = Math.floor(Math.random() * (bytes.length - 1000)) + 500;
+                bytes[pos] = Math.floor(Math.random() * 256);
+              }
+
+              let binaryString = '';
+              for (let i = 0; i < bytes.length; i++) {
+                binaryString += String.fromCharCode(bytes[i]);
+              }
+              const corruptedBase64 = btoa(binaryString);
+              setGlitchedImage(`data:image/jpeg;base64,${corruptedBase64}`);
+            } else {
+              setGlitchedImage(jpegDataUrl);
+            }
+          } else {
+            setGlitchedImage(canvas.toDataURL('image/png'));
+          }
+        }
+      }
+      setIsGlitching(false);
+    };
+
+    return () => {
+      workerRef.current?.terminate();
+    };
+  }, [corruptionLevel]);
 
   // Real-time update effect
   useEffect(() => {
     if (image) {
       const timer = setTimeout(() => {
         applyGlitch();
-      }, 150); // Increased debounce for better performance on rapid changes
+      }, 50); // Lower debounce thanks to worker
       return () => clearTimeout(timer);
     }
-  }, [image, glitchLevel, saturation, drift, mosh, jitter, skew, chromaticAberration, droop, colorShift, corruptionLevel, sharpness]);
+  }, [image, glitchLevel, saturation, drift, mosh, jitter, skew, chromaticAberration, droop, colorShift, corruptionLevel, sharpness, pixelSorting, channelXor]);
 
   // Sync preview height with controls height
   useEffect(() => {
@@ -83,6 +161,25 @@ export default function App() {
     setColorShift(0);
     setCorruptionLevel(0);
     setSharpness(100);
+    setPixelSorting(0);
+    setChannelXor(0);
+  };
+
+  const applyPreset = (preset: typeof PRESETS[0]) => {
+    const p = preset.params;
+    if (!locked.glitchLevel) setGlitchLevel(p.glitchLevel);
+    if (!locked.saturation) setSaturation(p.saturation);
+    if (!locked.drift) setDrift(p.drift);
+    if (!locked.mosh) setMosh(p.mosh);
+    if (!locked.jitter) setJitter(p.jitter);
+    if (!locked.skew) setSkew(p.skew);
+    if (!locked.chromaticAberration) setChromaticAberration(p.chromaticAberration);
+    if (!locked.droop) setDroop(p.droop);
+    if (!locked.colorShift) setColorShift(p.colorShift);
+    if (!locked.corruptionLevel) setCorruptionLevel(p.corruptionLevel);
+    if (!locked.sharpness) setSharpness(p.sharpness);
+    if (!locked.pixelSorting) setPixelSorting(p.pixelSorting);
+    if (!locked.channelXor) setChannelXor(p.channelXor);
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -119,385 +216,62 @@ export default function App() {
     if (!locked.colorShift) setColorShift(Math.floor(Math.random() * 100));
     if (!locked.corruptionLevel) setCorruptionLevel(Math.floor(Math.random() * 100));
     if (!locked.sharpness) setSharpness(Math.floor(Math.random() * 200));
+    if (!locked.pixelSorting) setPixelSorting(Math.floor(Math.random() * 100));
+    if (!locked.channelXor) setChannelXor(Math.floor(Math.random() * 100));
   };
 
   const applyGlitch = () => {
-    if (!image || !canvasRef.current || !sourceImageRef.current || isGlitching) return;
+    if (!image || !canvasRef.current || !sourceImageRef.current || !workerRef.current) return;
 
     setIsGlitching(true);
     
-    // Use a small timeout to allow the UI to update to "Processing" state before blocking the main thread
-    setTimeout(() => {
-      try {
-        const canvas = canvasRef.current!;
-        const ctx = canvas.getContext('2d', { willReadFrequently: true });
-        if (!ctx) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    if (!ctx) return;
 
-        const img = sourceImageRef.current!;
-        const maxWidth = 1200;
-        const scale = Math.min(1, maxWidth / img.width);
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
+    const img = sourceImageRef.current;
+    const maxWidth = 1200;
+    const scale = Math.min(1, maxWidth / img.width);
+    canvas.width = img.width * scale;
+    canvas.height = img.height * scale;
 
-        // Apply Blur if sharpness < 100
-        if (sharpness < 100) {
-          const blurAmount = (100 - sharpness) / 10;
-          ctx.filter = `blur(${blurAmount}px)`;
-        }
+    // Apply Blur if sharpness < 100
+    if (sharpness < 100) {
+      const blurAmount = (100 - sharpness) / 10;
+      ctx.filter = `blur(${blurAmount}px)`;
+    }
 
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        ctx.filter = 'none';
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    ctx.filter = 'none';
 
-        // Apply Sharpening if sharpness > 100 (using overlay blend mode trick)
-        if (sharpness > 100) {
-          const sharpenIntensity = (sharpness - 100) / 100;
-          ctx.globalCompositeOperation = 'overlay';
-          ctx.globalAlpha = sharpenIntensity;
-          ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-          ctx.globalCompositeOperation = 'source-over';
-          ctx.globalAlpha = 1.0;
-        }
-        
-        let imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-        let data = imageData.data;
-
-        // 1. Color Saturation & Color Shift
-        const satFactor = saturation / 100;
-        const shiftIntensity = colorShift / 100;
-        
-        for (let i = 0; i < data.length; i += 4) {
-          let r = data[i];
-          let g = data[i + 1];
-          let b = data[i + 2];
-
-          if (colorShift > 0) {
-            const rOrig = r;
-            const gOrig = g;
-            const bOrig = b;
-            r = (rOrig * (1 - shiftIntensity) + bOrig * shiftIntensity) % 256;
-            g = (gOrig * (1 - shiftIntensity) + rOrig * shiftIntensity) % 256;
-            b = (bOrig * (1 - shiftIntensity) + gOrig * shiftIntensity) % 256;
-
-            if (shiftIntensity > 0.4) {
-              if (rOrig > 150 && bOrig > 150) { r = 0; g = 255 * shiftIntensity; b = 0; }
-              else if (rOrig > 100 && rOrig < 200) { r = 150 * shiftIntensity; g = 0; b = 0; }
-            }
-            if (shiftIntensity > 0.7) {
-              const brightness = (rOrig + gOrig + bOrig) / 3;
-              if (brightness > 200) { r = 255 - r; g = 255 - g; b = 255 - b; }
-            }
-          }
-
-          const gray = 0.2989 * r + 0.5870 * g + 0.1140 * b;
-          data[i] = Math.min(255, Math.max(0, gray + (r - gray) * satFactor));
-          data[i + 1] = Math.min(255, Math.max(0, gray + (g - gray) * satFactor));
-          data[i + 2] = Math.min(255, Math.max(0, gray + (b - gray) * satFactor));
-        }
-        ctx.putImageData(imageData, 0, 0);
-
-        // 1.5 Chromatic Aberration
-        if (chromaticAberration > 0) {
-          const offset = Math.floor((chromaticAberration / 100) * 25);
-          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const newData = new Uint8ClampedArray(tempImageData.data);
-          
-          for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-              const idx = (y * canvas.width + x) * 4;
-              
-              // Shift Red channel to the right
-              const rX = Math.min(canvas.width - 1, Math.max(0, x + offset));
-              const rIdx = (y * canvas.width + rX) * 4;
-              newData[idx] = tempImageData.data[rIdx];
-              
-              // Keep Green channel as is
-              newData[idx + 1] = tempImageData.data[idx + 1];
-              
-              // Shift Blue channel to the left
-              const bX = Math.min(canvas.width - 1, Math.max(0, x - offset));
-              const bIdx = (y * canvas.width + bX) * 4;
-              newData[idx + 2] = tempImageData.data[bIdx + 2];
-              
-              // Keep Alpha
-              newData[idx + 3] = tempImageData.data[idx + 3];
-            }
-          }
-          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
-        }
-
-        // 2. Droop
-        if (droop > 0) {
-          const droopIntensity = (droop / 100);
-          const droopCount = Math.floor(canvas.width * 0.15 * droopIntensity);
-          for (let i = 0; i < droopCount; i++) {
-            const x = Math.floor(Math.random() * canvas.width);
-            const yStart = Math.floor(Math.random() * canvas.height);
-            const droopLen = Math.floor(Math.random() * (canvas.height - yStart) * (droop / 100));
-            const droopWidth = Math.floor(Math.random() * (droop / 5)) + 2;
-            if (droopLen > 0) {
-              try {
-                const slice = ctx.getImageData(x, yStart, droopWidth, 1);
-                for (let y = yStart; y < yStart + droopLen; y++) {
-                  if (y < canvas.height) {
-                    const drift = Math.sin(y * 0.05) * (droop / 40);
-                    ctx.putImageData(slice, x + drift, y);
-                  }
-                }
-              } catch (e) {}
-            }
-          }
-        }
-
-        // 3. Jitter (Interlace Jitter)
-        if (jitter > 0) {
-          const jitterAmount = Math.floor((jitter / 100) * 20);
-          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const newData = new Uint8ClampedArray(tempImageData.data);
-          for (let y = 0; y < canvas.height; y++) {
-            const offset = (y % 2 === 0 ? 1 : -1) * jitterAmount;
-            for (let x = 0; x < canvas.width; x++) {
-              const sourceX = (x + offset + canvas.width) % canvas.width;
-              const targetIdx = (y * canvas.width + x) * 4;
-              const sourceIdx = (y * canvas.width + sourceX) * 4;
-              newData[targetIdx] = tempImageData.data[sourceIdx];
-              newData[targetIdx + 1] = tempImageData.data[sourceIdx + 1];
-              newData[targetIdx + 2] = tempImageData.data[sourceIdx + 2];
-              newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
-            }
-          }
-          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
-        }
-
-        // 4. Scanline Glitch
-        if (glitchLevel > 0) {
-          const glitchCount = Math.floor((glitchLevel / 100) * 40);
-          for (let i = 0; i < glitchCount; i++) {
-            const y = Math.floor(Math.random() * canvas.height);
-            const h = Math.floor(Math.random() * (canvas.height / 8)) + 2;
-            const xOffset = (Math.random() - 0.5) * (glitchLevel / 100) * canvas.width * 0.4;
-            try {
-              const slice = ctx.getImageData(0, y, canvas.width, h);
-              ctx.putImageData(slice, xOffset, y);
-            } catch (e) {}
-          }
-        }
-
-        // 5. Random Color Blocks
-        if (glitchLevel > 30) {
-          const blockCount = Math.floor((glitchLevel / 100) * 15);
-          for (let i = 0; i < blockCount; i++) {
-            const x = Math.random() * canvas.width;
-            const y = Math.random() * canvas.height;
-            const w = Math.random() * canvas.width * 0.4;
-            const h = Math.random() * 30;
-            const r = Math.random() * 255;
-            const g = Math.random() * 255;
-            const b = Math.random() * 255;
-            ctx.fillStyle = `rgba(${r}, ${g}, ${b}, 0.4)`;
-            ctx.fillRect(x, y, w, h);
-            ctx.strokeStyle = `rgba(${g}, ${b}, ${r}, 0.8)`;
-            ctx.lineWidth = 1;
-            ctx.beginPath();
-            ctx.moveTo(x, y);
-            ctx.lineTo(x + w, y + h);
-            ctx.stroke();
-          }
-        }
-
-        // 6. Skew (VHS Tracking Error / Bending)
-        if (skew > 0) {
-          const skewIntensity = skew / 100;
-          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const newData = new Uint8ClampedArray(tempImageData.data);
-          
-          // Composite wave parameters for organic bending
-          const amp1 = skewIntensity * 50; // Large slow bends
-          const freq1 = 0.002 + skewIntensity * 0.008;
-          
-          const amp2 = skewIntensity * 15; // Faster wiggles
-          const freq2 = 0.02 + skewIntensity * 0.05;
-          
-          const jitterAmp = skewIntensity * 4; // High frequency sync jitter
-          
-          for (let y = 0; y < canvas.height; y++) {
-            // Calculate bending offset using multiple waves
-            const bend = Math.sin(y * freq1) * amp1 + Math.sin(y * freq2) * amp2;
-            const jitter = (Math.random() - 0.5) * jitterAmp;
-            const rowSkew = bend + jitter;
-            
-            const isSkewed = Math.abs(rowSkew) > 5;
-            
-            for (let x = 0; x < canvas.width; x++) {
-              // Wrap around the image for a more authentic tracking error look
-              const sourceX = (Math.floor(x + rowSkew) + canvas.width) % canvas.width;
-              
-              const targetIdx = (y * canvas.width + x) * 4;
-              const sourceIdx = (y * canvas.width + sourceX) * 4;
-              
-              let r = tempImageData.data[sourceIdx];
-              let g = tempImageData.data[sourceIdx + 1];
-              let b = tempImageData.data[sourceIdx + 2];
-
-              // VHS Color Bleed/Shift on skewed parts
-              if (isSkewed && skew > 30) {
-                r = (r + 40 * skewIntensity) % 256;
-                b = (b + 20 * skewIntensity) % 256;
-              }
-
-              // Analog Grain/Noise
-              if (skew > 50 && Math.random() < 0.15 * skewIntensity) {
-                const noise = (Math.random() - 0.5) * 130 * skewIntensity;
-                r = Math.min(255, Math.max(0, r + noise));
-                g = Math.min(255, Math.max(0, g + noise));
-                b = Math.min(255, Math.max(0, b + noise));
-              }
-              
-              // CRT Scanline effect
-              if (skew > 60 && y % 2 === 0) {
-                const darken = 0.85 + (1 - skewIntensity) * 0.1;
-                r *= darken; g *= darken; b *= darken;
-              }
-
-              newData[targetIdx] = r;
-              newData[targetIdx + 1] = g;
-              newData[targetIdx + 2] = b;
-              newData[targetIdx + 3] = tempImageData.data[sourceIdx + 3];
-            }
-          }
-          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
-        }
-
-        // 6.5 Drift (Pixel Drift)
-        if (drift > 0) {
-          const driftIntensity = drift / 100;
-          const tempImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const newData = new Uint8ClampedArray(tempImageData.data);
-          
-          // Use a lower probability but longer length to avoid "blurring" look at high levels
-          const threshold = 255 * (1 - (driftIntensity * 0.8));
-          const driftProb = 0.02 + (driftIntensity * 0.08);
-          const maxDriftLen = Math.floor(20 + (driftIntensity * 180));
-
-          for (let y = 0; y < canvas.height; y++) {
-            for (let x = 0; x < canvas.width; x++) {
-              const idx = (y * canvas.width + x) * 4;
-              const r = tempImageData.data[idx];
-              const g = tempImageData.data[idx + 1];
-              const b = tempImageData.data[idx + 2];
-              const brightness = (r + g + b) / 3;
-              
-              if (brightness > threshold && Math.random() < driftProb) {
-                const driftLen = Math.floor(Math.random() * maxDriftLen);
-                for (let d = 1; d <= driftLen; d++) {
-                  const targetX = x + d;
-                  if (targetX < canvas.width) {
-                    const tIdx = (y * canvas.width + targetX) * 4;
-                    // Blend slightly for smoother streaks
-                    newData[tIdx] = r;
-                    newData[tIdx + 1] = g;
-                    newData[tIdx + 2] = b;
-                  }
-                }
-                // Skip ahead to avoid overlapping too much
-                x += Math.floor(driftLen * 0.5);
-              }
-            }
-          }
-          ctx.putImageData(new ImageData(newData, canvas.width, canvas.height), 0, 0);
-        }
-
-        // 6.8 Mosh (Block Displacement)
-        if (mosh > 0) {
-          const moshIntensity = mosh / 100;
-          const blockSize = Math.floor(16 + (moshIntensity * 48));
-          const cols = Math.floor(canvas.width / blockSize);
-          const rows = Math.floor(canvas.height / blockSize);
-          const moveProb = 0.05 + (moshIntensity * 0.3);
-          
-          for (let r = 0; r < rows; r++) {
-            for (let c = 0; c < cols; c++) {
-              if (Math.random() < moveProb) {
-                const x = c * blockSize;
-                const y = r * blockSize;
-                const offsetX = (Math.random() - 0.5) * 120 * moshIntensity;
-                const offsetY = (Math.random() - 0.5) * 60 * moshIntensity;
-                
-                try {
-                  const block = ctx.getImageData(x, y, blockSize, blockSize);
-                  // Sometimes repeat the block for more "mosh" feel
-                  ctx.putImageData(block, x + offsetX, y + offsetY);
-                  if (moshIntensity > 0.7 && Math.random() < 0.3) {
-                    ctx.putImageData(block, x + offsetX * 1.5, y + offsetY * 1.5);
-                  }
-                } catch (e) {}
-              }
-            }
-          }
-        }
-
-        // 7. Error & Corruption Artifacts
-        if (corruptionLevel > 0) {
-          const artifactCount = Math.floor((corruptionLevel / 100) * 15);
-          for (let i = 0; i < artifactCount; i++) {
-            const type = Math.random();
-            const x = Math.random() * canvas.width;
-            const y = Math.random() * canvas.height;
-            if (type < 0.4) {
-              ctx.fillStyle = '#00ff00';
-              ctx.fillRect(x, y, Math.random() * 120, Math.random() * 80);
-            } else if (type < 0.7) {
-              ctx.fillStyle = '#000000';
-              ctx.fillRect(x, y, Math.random() * 200, Math.random() * 40);
-            } else {
-              const noiseSize = 50;
-              const noiseData = ctx.createImageData(noiseSize, noiseSize);
-              for (let j = 0; j < noiseData.data.length; j += 4) {
-                const val = Math.random() * 255;
-                noiseData.data[j] = val; noiseData.data[j+1] = val; noiseData.data[j+2] = val; noiseData.data[j+3] = 255;
-              }
-              ctx.putImageData(noiseData, x, y);
-            }
-          }
-        }
-
-        // 8. JPEG Corruption (moved from Quality)
-        if (corruptionLevel > 20) {
-          // Lower quality as corruption increases
-          const q = Math.max(0.01, 1 - (corruptionLevel / 100));
-          const jpegDataUrl = canvas.toDataURL('image/jpeg', q);
-          
-          // If corruption is high, we also corrupt the bytes
-          if (corruptionLevel > 60) {
-            const base64 = jpegDataUrl.split(',')[1];
-            const binary = atob(base64);
-            const bytes = new Uint8Array(binary.length);
-            for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-            
-            // Corrupt bytes based on intensity
-            const corruptionIntensity = Math.floor((corruptionLevel - 60) / 2);
-            for (let i = 0; i < corruptionIntensity; i++) {
-              const pos = Math.floor(Math.random() * (bytes.length - 1000)) + 500;
-              bytes[pos] = Math.floor(Math.random() * 256);
-            }
-
-            let binaryString = '';
-            for (let i = 0; i < bytes.length; i++) {
-              binaryString += String.fromCharCode(bytes[i]);
-            }
-            const corruptedBase64 = btoa(binaryString);
-            setGlitchedImage(`data:image/jpeg;base64,${corruptedBase64}`);
-          } else {
-            setGlitchedImage(jpegDataUrl);
-          }
-        } else {
-          setGlitchedImage(canvas.toDataURL('image/png'));
-        }
-      } catch (err) {
-        console.error("Glitch processing error:", err);
-      } finally {
-        setIsGlitching(false);
-      }
-    }, 10);
+    // Apply Sharpening if sharpness > 100
+    if (sharpness > 100) {
+      const sharpenIntensity = (sharpness - 100) / 100;
+      ctx.globalCompositeOperation = 'overlay';
+      ctx.globalAlpha = sharpenIntensity;
+      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 1.0;
+    }
+    
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    
+    workerRef.current.postMessage({
+      imageData,
+      glitchLevel,
+      saturation,
+      drift,
+      mosh,
+      jitter,
+      skew,
+      chromaticAberration,
+      droop,
+      colorShift,
+      corruptionLevel,
+      sharpness,
+      pixelSorting,
+      channelXor
+    }, [imageData.data.buffer]);
   };
 
   const downloadImage = () => {
@@ -533,7 +307,7 @@ export default function App() {
               <h2 className="font-bold uppercase tracking-wider">Parameters</h2>
             </div>
             
-            <div className="flex items-center gap-4">
+            <div className="flex items-center justify-between w-full gap-4">
               <div className="flex items-center p-1 bg-black/40 rounded-lg w-fit border border-vapor-purple/30">
                 <button 
                   onClick={() => setIsAdvancedMode(false)}
@@ -551,7 +325,7 @@ export default function App() {
 
               <button 
                 onClick={resetSliders}
-                className="text-[10px] font-mono uppercase tracking-tighter text-vapor-blue/60 hover:text-vapor-pink transition-colors flex items-center gap-1"
+                className="text-[10px] font-mono uppercase tracking-tighter text-vapor-blue/60 hover:text-vapor-pink transition-colors flex items-center gap-1 sm:ml-4"
               >
                 <RefreshCw size={10} />
                 Reset
@@ -790,6 +564,58 @@ export default function App() {
               />
             </div>
 
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('pixelSorting')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.pixelSorting ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.pixelSorting ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.pixelSorting ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Pixel Sorting</span>
+                  </div>
+                  <span>{pixelSorting}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={pixelSorting} 
+                  onChange={(e) => setPixelSorting(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
+              </div>
+            )}
+
+            {isAdvancedMode && (
+              <div className="space-y-2">
+                <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => toggleLock('channelXor')}
+                      className={`p-1 rounded hover:bg-vapor-purple/20 transition-colors ${locked.channelXor ? 'text-vapor-pink' : 'text-vapor-blue/40'}`}
+                      title={locked.channelXor ? "Unlock from Randomization" : "Lock from Randomization"}
+                    >
+                      {locked.channelXor ? <Lock size={12} /> : <Unlock size={12} />}
+                    </button>
+                    <span>Channel XOR</span>
+                  </div>
+                  <span>{channelXor}%</span>
+                </div>
+                <input 
+                  type="range" 
+                  min="0" 
+                  max="100" 
+                  value={channelXor} 
+                  onChange={(e) => setChannelXor(parseInt(e.target.value))}
+                  className="vapor-slider"
+                />
+              </div>
+            )}
+
             <div className="space-y-2">
               <div className="flex justify-between items-center text-xs font-mono text-vapor-blue uppercase">
                 <div className="flex items-center gap-2">
@@ -865,69 +691,116 @@ export default function App() {
           initial={{ opacity: 0, x: 20 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ delay: 0.2 }}
-          className="order-1 md:order-2 md:col-span-2 space-y-4"
+          className="order-1 md:order-2 md:col-span-2 space-y-8"
         >
-          <div 
-            style={{ height: controlsHeight ? `${controlsHeight}px` : 'auto', minHeight: '400px' }}
-            className="relative w-full bg-black/40 rounded-xl vapor-border overflow-hidden flex items-center justify-center group"
-          >
-            {!image ? (
-              <div 
-                onClick={() => fileInputRef.current?.click()}
-                className="flex flex-col items-center gap-4 cursor-pointer hover:scale-105 transition-transform p-8"
-              >
-                <div className="p-6 rounded-full bg-vapor-purple/20 border-2 border-dashed border-vapor-purple">
-                  <Upload size={48} className="text-vapor-purple" />
-                </div>
-                <p className="font-mono text-vapor-blue text-sm uppercase">Upload Source Image</p>
-              </div>
-            ) : (
-              <>
-                <img 
-                  src={glitchedImage || image} 
-                  alt="Preview" 
-                  className="max-w-full max-h-full object-contain"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute top-4 right-4 flex gap-2">
-                  <button 
-                    onClick={() => fileInputRef.current?.click()}
-                    className="p-2 bg-vapor-dark/80 border border-vapor-blue text-vapor-blue rounded-full hover:bg-vapor-blue hover:text-vapor-dark transition-colors"
-                    title="Change Image"
-                  >
-                    <ImageIcon size={20} />
-                  </button>
-                  {glitchedImage && (
-                    <button 
-                      onClick={downloadImage}
-                      className="p-2 bg-vapor-dark/80 border border-vapor-cyan text-vapor-cyan rounded-full hover:bg-vapor-cyan hover:text-vapor-dark transition-colors"
-                      title="Download Glitch"
-                    >
-                      <Download size={20} />
-                    </button>
-                  )}
-                </div>
-              </>
-            )}
-            
-            <input 
-              type="file" 
-              ref={fileInputRef} 
-              onChange={handleFileUpload} 
-              accept="image/*" 
-              className="hidden" 
-            />
+          {/* Presets Section Moved to Top */}
+          <div className="space-y-4">
+            <div className="flex items-center gap-2 text-vapor-cyan">
+              <Zap size={20} />
+              <h2 className="font-bold uppercase tracking-wider">Preset Tapes</h2>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {PRESETS.map((preset) => (
+                <button
+                  key={preset.name}
+                  onClick={() => applyPreset(preset)}
+                  className="group relative overflow-hidden p-4 bg-black/40 border border-vapor-blue/30 rounded-lg hover:border-vapor-cyan transition-all text-left"
+                >
+                  <div className="absolute inset-0 bg-gradient-to-br from-vapor-cyan/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
+                  <p className="font-mono text-[10px] text-vapor-blue/60 uppercase mb-1">Tape_0{PRESETS.indexOf(preset) + 1}</p>
+                  <p className="font-bold text-vapor-cyan uppercase tracking-tighter group-hover:text-white transition-colors">{preset.name}</p>
+                  <div className="mt-2 h-1 w-0 group-hover:w-full bg-vapor-cyan transition-all duration-300" />
+                </button>
+              ))}
+            </div>
           </div>
 
-          <div className="flex justify-between items-center px-2">
-            <div className="flex gap-2">
-              <div className="w-3 h-3 rounded-full bg-vapor-pink animate-pulse" />
-              <div className="w-3 h-3 rounded-full bg-vapor-blue animate-pulse [animation-delay:0.2s]" />
-              <div className="w-3 h-3 rounded-full bg-vapor-cyan animate-pulse [animation-delay:0.4s]" />
+          <div className="space-y-4">
+            <div 
+              style={{ 
+                height: !image && controlsHeight ? `${controlsHeight}px` : 'auto', 
+                minHeight: !image ? '400px' : '0' 
+              }}
+              className="relative w-full bg-black/40 rounded-xl vapor-border overflow-hidden flex items-center justify-center group"
+            >
+              {!image ? (
+                <div 
+                  onClick={() => fileInputRef.current?.click()}
+                  className="flex flex-col items-center gap-4 cursor-pointer hover:scale-105 transition-transform p-8"
+                >
+                  <div className="p-6 rounded-full bg-vapor-purple/20 border-2 border-dashed border-vapor-purple">
+                    <Upload size={48} className="text-vapor-purple" />
+                  </div>
+                  <p className="font-mono text-vapor-blue text-sm uppercase">Upload Source Image</p>
+                </div>
+              ) : (
+                <div className="relative w-full flex items-center justify-center">
+                  {/* Original Image */}
+                  <img 
+                    src={image} 
+                    alt="Original" 
+                    className={`max-w-full max-h-full object-contain transition-opacity duration-300 ${showOriginal ? 'opacity-100' : 'opacity-0'}`}
+                    referrerPolicy="no-referrer"
+                  />
+                  
+                  {/* Glitched Image */}
+                  <div className={`absolute inset-0 flex items-center justify-center overflow-hidden transition-opacity duration-300 ${showOriginal ? 'opacity-0' : 'opacity-100'}`}>
+                    <img 
+                      src={glitchedImage || image} 
+                      alt="Glitched" 
+                      className="max-w-full max-h-full object-contain"
+                      referrerPolicy="no-referrer"
+                    />
+                  </div>
+
+                  <div className="absolute top-4 right-4 flex gap-2 z-20">
+                    <div 
+                      onMouseEnter={() => setShowOriginal(true)}
+                      onMouseLeave={() => setShowOriginal(false)}
+                      className={`p-2 bg-vapor-dark/80 border rounded-full transition-all flex items-center justify-center cursor-help ${showOriginal ? 'border-vapor-blue text-vapor-blue opacity-50' : 'border-vapor-cyan text-vapor-cyan shadow-[0_0_10px_rgba(0,255,255,0.5)]'}`}
+                      title="Hover to see original image"
+                    >
+                      {showOriginal ? <EyeOff size={20} /> : <Eye size={20} />}
+                    </div>
+                    <button 
+                      onClick={() => fileInputRef.current?.click()}
+                      className="p-2 bg-vapor-dark/80 border border-vapor-blue text-vapor-blue rounded-full hover:bg-vapor-blue hover:text-vapor-dark transition-colors"
+                      title="Change Image"
+                    >
+                      <ImageIcon size={20} />
+                    </button>
+                    {glitchedImage && (
+                      <button 
+                        onClick={downloadImage}
+                        className="p-2 bg-vapor-dark/80 border border-vapor-cyan text-vapor-cyan rounded-full hover:bg-vapor-cyan hover:text-vapor-dark transition-colors"
+                        title="Download Glitch"
+                      >
+                        <Download size={20} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+              
+              <input 
+                type="file" 
+                ref={fileInputRef} 
+                onChange={handleFileUpload} 
+                accept="image/*" 
+                className="hidden" 
+              />
             </div>
-            <p className="font-mono text-[10px] text-vapor-purple/60 uppercase">
-              System Status: {image ? "Ready to Bend" : "Awaiting Input"}
-            </p>
+
+            <div className="flex justify-between items-center px-2">
+              <div className="flex gap-2">
+                <div className="w-3 h-3 rounded-full bg-vapor-pink animate-pulse" />
+                <div className="w-3 h-3 rounded-full bg-vapor-blue animate-pulse [animation-delay:0.2s]" />
+                <div className="w-3 h-3 rounded-full bg-vapor-cyan animate-pulse [animation-delay:0.4s]" />
+              </div>
+              <p className="font-mono text-[10px] text-vapor-purple/60 uppercase">
+                System Status: {image ? "Ready to Bend" : "Awaiting Input"}
+              </p>
+            </div>
           </div>
         </motion.section>
       </main>
